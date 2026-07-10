@@ -1,0 +1,1621 @@
+---
+title: "plot_code_CCZV"
+author: "Bowen"
+date: "2026-06-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Fig. 2
+
+## Fig. 2a
+```{r cars}
+# =========================================================
+# Relative proportion of annotated vs unannotated taxa
+# across taxonomic levels
+# =========================================================
+
+# -----------------------------
+# 1. Load packages
+# -----------------------------
+library(ggplot2)
+
+# -----------------------------
+# 2. Load input data
+# -----------------------------
+df_2a <- readRDS("df_2a.rds")
+
+# -----------------------------
+# 3. Set factor order
+# -----------------------------
+df_2a$Taxonomy <- factor(
+  df_2a$Taxonomy,
+  levels = c("Realm", "Kingdom", "Phylum", "Class", "Order", "Family")
+)
+
+df_2a$type <- factor(
+  df_2a$type,
+  levels = c("Unannotated", "Annotated")
+)
+
+# -----------------------------
+# 4. Define fill colors
+# -----------------------------
+fill_colors <- c("#cccccc", "#c3d7f2")
+
+# -----------------------------
+# 5. Plot
+# -----------------------------
+p_2a <- ggplot(
+  df_2a,
+  aes(x = Taxonomy, y = 100 * Proportion, fill = type)
+) +
+  geom_col(width = 0.8) +
+  labs(
+    x = "Taxonomy level",
+    y = "Relative proportion (%)",
+    fill = ""
+  ) +
+  scale_fill_manual(values = fill_colors) +
+  theme_light() +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15, angle = 90),
+    axis.text.x = element_text(size = 12, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 10),
+    legend.text = element_text(size = 12),
+    panel.border = element_rect(color = "black", linewidth = 1, fill = NA),
+    panel.grid = element_blank(),
+    axis.ticks.length = unit(0.2, "cm"),
+    axis.ticks = element_line(color = "black", linewidth = 1)
+  )
+
+p_2a
+```
+
+## Fig. 2b
+```{r cars}
+# =========================================================
+# Donut chart of temperate vs unknown viruses
+# =========================================================
+
+# -----------------------------
+# 1. Load packages
+# -----------------------------
+library(ggplot2)
+library(dplyr)
+
+# -----------------------------
+# 2. Input data
+# -----------------------------
+donut_df <- data.frame(
+  group = c("Temperate viruses", "Unknown"),
+  value = c(1060, 10682)
+)
+
+# -----------------------------
+# 3. Calculate percentages and label positions
+# -----------------------------
+donut_df <- donut_df %>%
+  mutate(
+    pct = value / sum(value) * 100,
+    label = paste0(round(pct, 1), "%"),
+    ymax = cumsum(value),
+    ymin = lag(ymax, default = 0),
+    ypos = (ymax + ymin) / 2
+  )
+
+# -----------------------------
+# 4. Define fill colors
+# -----------------------------
+fill_colors <- c(
+  "Temperate viruses" = "#5679BA",
+  "Unknown" = "#E6E6E6"
+)
+
+# -----------------------------
+# 5. Plot
+# -----------------------------
+p_2b <- ggplot(donut_df, aes(x = 2, y = value, fill = group)) +
+  geom_col(width = 1, color = "white") +
+  geom_text(
+    aes(x = 2, y = ypos, label = label),
+    size = 7,
+    color = "black"
+  ) +
+  coord_polar(theta = "y") +
+  xlim(0.5, 2.5) +
+  scale_fill_manual(values = fill_colors) +
+  theme_void() +
+  theme(
+    legend.title = element_blank()
+  )
+
+p_2b
+
+```
+
+## Fig. 2c
+```{r cars}
+# =========================================================
+# Beta-diversity analysis of vOTU communities
+# =========================================================
+
+# -----------------------------
+# 1. Load packages
+# -----------------------------
+library(dplyr)
+library(tibble)
+library(zCompositions)
+library(vegan)
+library(ggplot2)
+
+# -----------------------------
+# 2. Load input data
+# -----------------------------
+# Required objects in df_2c.rds:
+# - vOTU_count: abundance table (first column = vOTU ID, remaining columns = samples)
+# - meta: sample metadata table containing at least Sample and Group
+dat_list <- readRDS("df_2c.rds")
+
+vOTU_count <- dat_list$vOTU_count
+meta <- dat_list$meta
+
+# -----------------------------
+# 3. Format abundance matrix
+# -----------------------------
+otu_df <- as.data.frame(vOTU_count)
+
+votu_ids <- as.character(otu_df[[1]])
+rownames(otu_df) <- votu_ids
+otu_df[[1]] <- NULL
+
+otu_mat <- as.matrix(otu_df)
+otu_mat <- apply(otu_mat, 2, as.numeric)
+rownames(otu_mat) <- votu_ids
+otu_mat <- t(otu_mat)
+
+# -----------------------------
+# 4. Match samples between abundance matrix and metadata
+# -----------------------------
+sample_set <- as.character(meta$Sample)
+common_samples <- intersect(rownames(otu_mat), sample_set)
+
+stopifnot(length(common_samples) >= 2)
+
+otu_mat <- otu_mat[common_samples, , drop = FALSE]
+
+meta <- meta %>%
+  filter(Sample %in% common_samples) %>%
+  arrange(match(Sample, common_samples))
+
+# -----------------------------
+# 5. Optional: calculate occurrence rate
+# -----------------------------
+occurrence_rate <- colSums(otu_mat != 0, na.rm = TRUE) / nrow(otu_mat)
+
+# -----------------------------
+# 6. Zero replacement
+#    zCompositions::cmultRepl with CZM method
+# -----------------------------
+otu_z <- cmultRepl(
+  X = otu_mat,
+  label = 0,
+  method = "CZM",
+  output = "p-counts"
+)
+
+# -----------------------------
+# 7. CLR transformation
+# -----------------------------
+otu_clr <- decostand(otu_z, method = "clr")
+
+# -----------------------------
+# 8. Aitchison distance + PERMANOVA
+# -----------------------------
+dist_aitchison <- dist(otu_clr, method = "euclidean")
+
+set.seed(123)
+perm_div <- adonis2(
+  dist_aitchison ~ Group,
+  data = meta,
+  permutations = 999
+)
+
+print(perm_div)
+
+adonis_label <- paste0(
+  "adonis R2: ", round(perm_div$R2[1], 2),
+  "; P-value: ", perm_div$`Pr(>F)`[1]
+)
+
+adonis_label
+
+# -----------------------------
+# 9. PCA
+# -----------------------------
+pca <- prcomp(otu_clr, center = TRUE, scale. = FALSE)
+
+var_exp <- (pca$sdev^2) / sum(pca$sdev^2)
+
+pc_df <- as.data.frame(pca$x[, 1:2, drop = FALSE]) %>%
+  rownames_to_column("Sample") %>%
+  left_join(meta, by = "Sample")
+
+# -----------------------------
+# 10. Plot PCA
+# -----------------------------
+p_2c <- ggplot(pc_df, aes(x = PC1, y = PC2, fill = Group)) +
+  geom_point(aes(shape = Group), size = 5) +
+  stat_ellipse(
+    aes(color = Group),
+    type = "norm",
+    linetype = 2,
+    linewidth = 0.7,
+    geom = "path",
+    alpha = 1
+  ) +
+  labs(
+    x = paste0("PC1 (", sprintf("%.2f", 100 * var_exp[1]), "%)"),
+    y = paste0("PC2 (", sprintf("%.2f", 100 * var_exp[2]), "%)")
+  ) +
+  scale_color_manual(values = c("#5679ba", "#ee553d", "#c6e9f4", "#ffe094")) +
+  scale_fill_manual(values = c("#5679ba", "#ee553d", "#c6e9f4", "#ffe094")) +
+  scale_shape_manual(values = 21:24) +
+  annotate(
+    geom = "text",
+    x = 0,
+    y = 0.35,
+    label = adonis_label,
+    size = 8
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    panel.background = element_rect(fill = "white", colour = "black"),
+    axis.title.x = element_text(colour = "black", size = 20),
+    axis.title.y = element_text(colour = "black", size = 20),
+    plot.title = element_text(hjust = 0.5, size = 20),
+    axis.text = element_text(colour = "black", size = 15),
+    legend.background = element_rect(color = "#808080", linetype = 1),
+    legend.title = element_text(size = 15, color = "black"),
+    legend.text = element_text(size = 12),
+    strip.text = element_text(size = 25),
+    strip.background = element_rect(color = "black"),
+    panel.border = element_rect(linewidth = 1)
+  )
+
+p_2c
+
+```
+
+## Fig. 2d
+```{r cars}
+# =========================================================
+# Microdiversity comparison across sediment depth layers
+# =========================================================
+
+library(tidyverse)   # dplyr, ggplot2, readr, tidyr
+library(rstatix)     # compare_means, kruskal_test, etc.
+library(ggpubr)      # stat_compare_means
+library(openxlsx)
+
+# -----------------------------
+# 1. Input data
+# -----------------------------
+
+df_2d <- readRDS("df_2d.rds")
+
+# Set depth order for plotting and statistics
+df_2d$depth <- factor(
+  df_2d$depth,
+  levels = c("0-2", "4-6", "8-10", "14-16")
+)
+
+# -----------------------------
+# 2. Number of viruses per sample
+# -----------------------------
+sample_counts <- df_2d %>%
+  group_by(source) %>%
+  summarise(n_virus = n(), .groups = "drop") %>%
+  arrange(n_virus)
+
+# -----------------------------
+# 3. Custom function:
+#    randomly subsample 50 pi values per sample,
+#    repeat 1,000 times, and return the average
+# -----------------------------
+subsample_pi <- function(df, n = 50, times = 1000) {
+  means <- replicate(times, {
+    sampled <- sample(df$pi, size = min(n, nrow(df)), replace = FALSE)
+    mean(sampled, na.rm = TRUE)
+  })
+  mean(means, na.rm = TRUE)
+}
+
+# -----------------------------
+# 4. Calculate microdiversity for each sample
+# -----------------------------
+result <- df_2d %>%
+  group_by(source, depth) %>%
+  summarise(
+    microdiversity = subsample_pi(cur_data_all()),
+    .groups = "drop"
+  )
+
+print(result)
+
+# -----------------------------
+# 5. Plot settings
+# -----------------------------
+# Colors for depth groups
+my_colors <- c("#5679ba", "#c6e9f4", "#ffe094", "#ee553d")
+
+# Point shape mapping (kept for consistency)
+shape_mapping <- c(
+  "0-2"   = 21,
+  "4-6"   = 21,
+  "8-10"  = 21,
+  "14-16" = 21
+)
+
+# Pairwise comparisons for significance testing
+my_comparisons <- list(
+  c("0-2", "4-6"),
+  c("0-2", "8-10"),
+  c("0-2", "14-16"),
+  c("4-6", "8-10"),
+  c("4-6", "14-16"),
+  c("8-10", "14-16")
+)
+
+# -----------------------------
+# 6. Pairwise Wilcoxon tests
+# -----------------------------
+pwc <- compare_means(
+  microdiversity ~ depth,
+  data = result,
+  comparisons = my_comparisons,
+  method = "wilcox.test"
+) %>%
+  mutate(
+    p.adj = p.adjust(p, method = "BH"),
+    p.adj.signif = symnum(
+      p.adj,
+      cutpoints = c(0, 1e-4, 1e-3, 1e-2, 0.05, 1),
+      symbols = c("****", "***", "**", "*", "ns")
+    )
+  )
+
+# Add y positions for significance labels
+ymax <- max(result$microdiversity, na.rm = TRUE)
+ymin <- min(result$microdiversity, na.rm = TRUE)
+step <- 0.06 * (ymax - ymin)
+
+pwc <- pwc %>%
+  arrange(group1, group2) %>%
+  mutate(y.position = ymax + step * seq_len(n()))
+
+# -----------------------------
+# 7. Kruskal-Wallis test
+# -----------------------------
+kw <- kruskal.test(microdiversity ~ depth, data = result)
+
+kw_df <- data.frame(
+  test = "Kruskal-Wallis",
+  statistic = unname(kw$statistic),
+  df = unname(kw$parameter),
+  p.value = kw$p.value,
+  method = kw$method,
+  stringsAsFactors = FALSE
+)
+
+# Safety check
+stopifnot("y.position" %in% names(pwc))
+
+# -----------------------------
+# 8. Plot
+# -----------------------------
+p_2d <- ggplot(
+  result,
+  aes(x = depth, y = microdiversity, fill = depth)
+) +
+  geom_boxplot(width = 0.6, outlier.shape = NA, size = 0.3) +
+  geom_jitter(
+    aes(color = depth),
+    width = 0.20,
+    size = 1,
+    alpha = 0.6,
+    show.legend = FALSE
+  ) +
+  scale_shape_manual(values = 16) +
+  scale_fill_manual(values = my_colors) +
+  scale_color_manual(values = my_colors) +
+  theme_bw() +
+  theme(
+    panel.grid      = element_blank(),
+    axis.text.x     = element_text(size = 13),
+    axis.text.y     = element_text(size = 13),
+    axis.title.x    = element_text(size = 16),
+    axis.title.y    = element_text(size = 16),
+    strip.text      = element_text(face = "bold", size = 10),
+    plot.title      = element_text(size = 18, face = "bold"),
+    legend.position = "none"
+  ) +
+  stat_pvalue_manual(
+    pwc,
+    label = "p.adj.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    inherit.aes = FALSE
+  ) +
+  labs(x = "", y = "microdiversity (pi)")
+
+p_2d
+
+
+```
+
+## Fig. 2e
+```{r cars}
+# =========================================================
+# Compare pNpS ratio across sediment depth layers 
+# =========================================================
+
+library(tidyverse)   # dplyr, ggplot2, readr, tidyr
+library(rstatix)     # compare_means and related stats helpers
+library(ggpubr)      # stat_pvalue_manual
+library(openxlsx)
+
+# -----------------------------
+# 1. Input data
+# -----------------------------
+df_2e <- readRDS("df_2e.rds")
+
+# Set depth order for plotting and statistical tests
+df_2e$depth <- factor(
+  df_2e$depth,
+  levels = c("0-2", "4-6", "8-10", "14-16")
+)
+
+# -----------------------------
+# 2. Pairwise group comparisons
+# -----------------------------
+my_comparisons <- list(
+  c("0-2", "4-6"),
+  c("0-2", "8-10"),
+  c("0-2", "14-16"),
+  c("4-6", "8-10"),
+  c("4-6", "14-16"),
+  c("8-10", "14-16")
+)
+
+# -----------------------------
+# 3. Global Kruskal-Wallis test
+# -----------------------------
+kw <- kruskal.test(pNpS_ratio ~ depth, data = df_2e)
+
+kw_df <- data.frame(
+  test = "Kruskal-Wallis",
+  statistic = unname(kw$statistic),
+  df = unname(kw$parameter),
+  p.value = kw$p.value,
+  stringsAsFactors = FALSE
+)
+
+# For consistency and future reuse, BH-FDR is also recorded here
+kw_df$p.adj.BH <- p.adjust(kw_df$p.value, method = "BH")
+
+kw_label <- paste0(
+  "KW p = ", signif(kw_df$p.value, 3),
+  " (BH-FDR = ", signif(kw_df$p.adj.BH, 3), ")"
+)
+
+# -----------------------------
+# 4. Pairwise Wilcoxon tests + BH-FDR
+# -----------------------------
+pwc <- compare_means(
+  pNpS_ratio ~ depth,
+  data = df_2e,
+  comparisons = my_comparisons,
+  method = "wilcox.test"
+) %>%
+  mutate(
+    p.adj = p.adjust(p, method = "BH")
+  ) %>%
+  mutate(
+    p.adj.signif = case_when(
+      p.adj <= 1e-4 ~ "****",
+      p.adj <= 1e-3 ~ "***",
+      p.adj <= 1e-2 ~ "**",
+      p.adj <= 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+
+# -----------------------------
+# 5. Y positions for significance labels
+#    This prevents overlap among pairwise comparisons
+# -----------------------------
+ymax <- max(df_2e$pNpS_ratio, na.rm = TRUE)
+ymin <- min(df_2e$pNpS_ratio, na.rm = TRUE)
+step <- 0.08 * (ymax - ymin)
+
+# Fallback in case all values are identical
+if (!is.finite(step) || step == 0) step <- 0.1
+
+pwc <- pwc %>%
+  arrange(group1, group2) %>%
+  mutate(y.position = ymax + step * seq_len(n()))
+
+# -----------------------------
+# 6. Plot settings
+# -----------------------------
+my_colors <- c("#5679ba", "#c6e9f4", "#ffe094", "#ee553d")
+
+# Note:
+# shape_mapping is retained for consistency with similar scripts,
+# although shape is not explicitly mapped in this plot.
+shape_mapping <- c(
+  "0-2"   = 21,
+  "4-6"   = 21,
+  "8-10"  = 21,
+  "14-16" = 21
+)
+
+# -----------------------------
+# 7. Plot
+# -----------------------------
+p_2e <- ggplot(
+  df_2e,
+  aes(x = depth, y = pNpS_ratio, fill = depth)
+) +
+  geom_boxplot(
+    width = 0.6,
+    outlier.shape = NA,
+    size = 0.3
+  ) +
+  geom_jitter(
+    aes(color = depth),
+    width = 0.20,
+    size = 1,
+    alpha = 0.6,
+    show.legend = FALSE
+  ) +
+  scale_shape_manual(values = 16) +
+  scale_fill_manual(values = my_colors) +
+  scale_color_manual(values = my_colors) +
+  stat_summary(
+    fun = median,
+    geom = "text",
+    aes(label = round(after_stat(y), 2)),
+    vjust = -0.5,
+    color = "black",
+    size = 4
+  ) +
+  stat_pvalue_manual(
+    pwc,
+    label = "p.adj.signif",
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01,
+    inherit.aes = FALSE
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    strip.text = element_text(face = "bold", size = 10),
+    plot.title = element_text(size = 18, face = "bold"),
+    legend.position = "none"
+  ) +
+  labs(x = "", y = "pNpS ratio")
+
+p_2e
+
+```
+
+## Fig. 2f
+```{r cars}
+library(tidyverse)
+library(ggplot2)
+
+# -----------------------------
+# 1. Input data
+# -----------------------------
+df_2f <- readRDS("df_2f.rds")
+
+# -----------------------------
+# 2. Set factor order
+# -----------------------------
+df_2f$group <- factor(
+  df_2f$group,
+  levels = c("0-2", "4-6", "8-10", "14-16")
+)
+
+df_2f$Function <- factor(
+  df_2f$Function,
+  levels = c(
+    "DNA replication and repair & Metabolism",
+    "Transcription and translation",
+    "Assembly and packaging",
+    "Lysis and lysogeny",
+    "Structural proteins",
+    "Others"
+  )
+)
+
+# -----------------------------
+# 3. Color palette
+# -----------------------------
+fill_colors <- c(
+  "#5679ba", "#c6e9f4", "#ffe094",
+  "#ffa45c", "#ee553d", "#CCCCCC"
+)
+
+# -----------------------------
+# 4. Plot
+# -----------------------------
+p_2f <- ggplot(
+  df_2f,
+  aes(x = group, y = 100 * value, fill = Function)
+) +
+  geom_col(width = 0.8) +
+  scale_fill_manual(values = fill_colors) +
+  labs(
+    x = "Depth",
+    y = "Relative proportion (%)",
+    fill = ""
+  ) +
+  theme_light() +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15, angle = 90),
+    axis.text.x = element_text(size = 12, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 10),
+    legend.text = element_text(size = 12),
+    panel.border = element_rect(color = "black", linewidth = 1, fill = NA),
+    panel.grid = element_blank(),
+    axis.ticks.length = unit(0.2, "cm"),
+    axis.ticks = element_line(color = "black", linewidth = 1)
+  )
+
+p_2f
+
+```
+
+# Fig. 3
+
+## Fig. 3b
+```{r cars}
+# =========================================================
+# Five-set Venn diagram
+# =========================================================
+
+# -----------------------------
+# 1. Load packages
+# -----------------------------
+library(VennDiagram)
+
+# -----------------------------
+# 2. Load input data
+# -----------------------------
+df_3b <- readRDS("df_3b.rds")
+
+# -----------------------------
+# 3. Helper function:
+#    remove empty strings and NA values
+# -----------------------------
+clean_values <- function(x) {
+  na.omit(x[x != ""])
+}
+
+# -----------------------------
+# 4. Extract and clean each set
+# -----------------------------
+venn_sets <- list(
+  Refseq   = clean_values(df_3b$RefSeq),
+  Seawater = clean_values(df_3b$Seawater),
+  Coldseep = clean_values(df_3b$Coldseep),
+  Trench   = clean_values(df_3b$Trench),
+  CCZ      = clean_values(df_3b$CCZ)
+)
+
+# -----------------------------
+# 5. Define colors
+# -----------------------------
+venn_colors <- c(
+  "dodgerblue",
+  "goldenrod1",
+  "darkorange1",
+  "seagreen3",
+  "orchid3"
+)
+
+# -----------------------------
+# 6. Draw and export Venn diagram
+# -----------------------------
+venn.diagram(
+  x = venn_sets,
+  scaled = FALSE,
+  alpha = 0.8,
+  lwd = 1,
+  lty = 1,
+  col = venn_colors,
+  label.col = "black",
+  cex = 1,
+  fontface = "bold",
+  fill = venn_colors,
+  category.names = names(venn_sets),
+  cat.dist = 0.03,
+  cat.cex = 1,
+  cat.fontface = "bold",
+  cat.col = "black",
+  cat.default.pos = "text",
+  output = TRUE,
+  filename = "./vnn.svg",
+  imagetype = "svg",
+  resolution = 400,
+  compression = "lzw",
+  width = 5,
+  height = 5
+)
+
+```
+
+## Fig. 3c
+```{r cars}
+#!/usr/bin/env Rscript
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(scales)
+library(ComplexUpset)
+library(RColorBrewer)
+library(patchwork)
+library(readr)
+
+# =========================================================
+# Integrated analysis of shared clusters across deep-sea habitats
+# Includes:
+# 1) UpSet plot of CCZV-shared clusters
+# 2) Horizontal bar plot of total vs shared clusters
+# 3) Donut plots of functional composition for shared groups
+# =========================================================
+
+# -----------------------------
+# 1. Load input data
+# -----------------------------
+input_data <- readRDS("df_3c.rds")
+dat <- input_data$pc_deepsea
+# -----------------------------
+# 2. Global settings
+# -----------------------------
+sets <- c("CCZV", "HV", "coldseep", "OTVGD")
+
+habitat_colors <- c(
+  CCZV     = "#D55E00",
+  HV       = "#009E73",
+  coldseep = "#CC79A7",
+  OTVGD    = "#E69F00"
+)
+
+func_levels <- c(
+  "anti-host defense",
+  "exit",
+  "gene expression",
+  "integration",
+  "other",
+  "packaging",
+  "replication",
+  "structural",
+  "unknown",
+  "no_annotation"
+)
+
+func_palette <- RColorBrewer::brewer.pal(12, "Set3")
+func_colors <- setNames(func_palette[1:length(func_levels)], func_levels)
+
+# -----------------------------
+# 3. Detect required columns
+# -----------------------------
+id_col <- dplyr::coalesce(
+  if ("protein" %in% names(dat)) "protein" else NA_character_,
+  if ("contig"  %in% names(dat)) "contig"  else NA_character_
+)
+
+if (is.na(id_col)) stop("Missing protein/contig column.", call. = FALSE)
+if (!"cluster" %in% names(dat)) stop("Missing cluster column.", call. = FALSE)
+if (!"function" %in% names(dat)) stop("Missing function column.", call. = FALSE)
+
+# -----------------------------
+# 4. Prepare protein-level table
+# -----------------------------
+dat1 <- dat %>%
+  transmute(
+    cluster = .data[["cluster"]],
+    protein = .data[[id_col]],
+    func = as.character(.data[["function"]])
+  ) %>%
+  mutate(
+    func = ifelse(is.na(func) | func == "" | func == "NA", "no_annotation", func),
+    func = factor(func, levels = func_levels),
+    habitat = case_when(
+      str_detect(protein, "^CCZV|^FN") ~ "CCZV",
+      str_detect(protein, "^HV") ~ "HV",
+      str_detect(protein, "^coldseep") ~ "coldseep",
+      str_detect(protein, "^OTVGD") ~ "OTVGD",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(habitat)) %>%
+  mutate(habitat = factor(habitat, levels = sets))
+
+# -----------------------------
+# 5. Build cluster-by-habitat matrix
+# -----------------------------
+cl_hab <- dat1 %>%
+  distinct(cluster, habitat)
+
+mat_all <- cl_hab %>%
+  mutate(val = 1L) %>%
+  pivot_wider(names_from = habitat, values_from = val, values_fill = 0L)
+
+for (m in setdiff(sets, names(mat_all))) mat_all[[m]] <- 0L
+
+mat_all <- mat_all %>%
+  select(cluster, all_of(sets))
+
+# Keep only clusters shared between CCZV and at least one other habitat
+mat_cczv_shared <- mat_all %>%
+  filter(CCZV == 1L) %>%
+  filter(HV == 1L | coldseep == 1L | OTVGD == 1L)
+
+if (nrow(mat_cczv_shared) == 0) {
+  stop("No clusters shared between CCZV and other habitats were detected.", call. = FALSE)
+}
+
+# -----------------------------
+# 6. UpSet plot
+# -----------------------------
+p_upset <- ComplexUpset::upset(
+  mat_cczv_shared,
+  rev(sets),
+  sort_sets = FALSE,
+  name = "Habitat",
+  min_size = 1,
+  width_ratio = 0.15,
+  set_sizes = upset_set_size() + ylab("Number of shared clusters"),
+  matrix = (
+    intersection_matrix(geom = geom_point(shape = "circle filled", size = 5)) +
+      scale_color_manual(
+        values = habitat_colors,
+        guide = guide_legend(override.aes = list(shape = "circle filled"))
+      )
+  ),
+  queries = list(
+    upset_query(set = "CCZV",     fill = habitat_colors["CCZV"]),
+    upset_query(set = "HV",       fill = habitat_colors["HV"]),
+    upset_query(set = "coldseep", fill = habitat_colors["coldseep"]),
+    upset_query(set = "OTVGD",    fill = habitat_colors["OTVGD"])
+  )
+)
+
+# -----------------------------
+# 7. Horizontal bar plot:
+#    total clusters vs clusters shared with CCZV
+# -----------------------------
+sum_bar_df <- tibble(habitat = sets) %>%
+  rowwise() %>%
+  mutate(
+    total = sum(mat_all[[habitat]] == 1L),
+    shared_with_cczv = if (habitat == "CCZV") {
+      sum(mat_all$CCZV == 1L & (mat_all$HV == 1L | mat_all$coldseep == 1L | mat_all$OTVGD == 1L))
+    } else {
+      sum(mat_all[[habitat]] == 1L & mat_all$CCZV == 1L)
+    }
+  ) %>%
+  ungroup() %>%
+  mutate(
+    habitat = factor(habitat, levels = rev(sets)),
+    total_plot = log10(total),
+    shared_plot = log10(shared_with_cczv)
+  )
+
+p_bar <- ggplot(sum_bar_df, aes(y = habitat)) +
+  geom_col(aes(x = total_plot), fill = "grey85", width = 0.70) +
+  geom_col(aes(x = shared_plot, fill = habitat), width = 0.70) +
+  scale_fill_manual(values = habitat_colors, guide = "none") +
+  scale_x_reverse(
+    expand = expansion(mult = c(0.02, 0.15)),
+    breaks = pretty_breaks(n = 5),
+    labels = function(x) label_number(big.mark = ",")(10^x)
+  ) +
+  labs(x = "Number of clusters (log10; reversed)", y = NULL) +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+
+# -----------------------------
+# 8. Convert membership pattern to shared-group labels
+# -----------------------------
+pattern_to_label <- function(pat, sets) {
+  bits <- strsplit(pat, "")[[1]]
+  on_sets <- sets[which(bits == "1")]
+  paste(on_sets, collapse = "+")
+}
+
+cl_group <- mat_cczv_shared %>%
+  mutate(pattern = apply(across(all_of(sets)), 1, paste0, collapse = "")) %>%
+  transmute(
+    cluster,
+    group = vapply(pattern, pattern_to_label, character(1), sets = sets)
+  )
+
+# -----------------------------
+# 9. Summarize protein-level functional composition
+# -----------------------------
+prot_group <- dat1 %>%
+  inner_join(cl_group, by = "cluster")
+
+sum_func_df <- prot_group %>%
+  count(group, func, name = "n") %>%
+  group_by(group) %>%
+  mutate(pct = 100 * n / sum(n)) %>%
+  ungroup() %>%
+  mutate(
+    func = factor(func, levels = func_levels),
+    group = factor(group, levels = sort(unique(group)))
+  )
+
+readr::write_tsv(sum_func_df, "intersection_func_summary.tsv")
+
+# -----------------------------
+# 10. Donut plot function
+# -----------------------------
+make_donut <- function(df_one, title_text, show_legend = FALSE) {
+  df_one <- df_one %>% filter(n > 0)
+
+  ggplot(df_one, aes(x = 2, y = pct, fill = func)) +
+    geom_col(width = 0.85, color = "white", linewidth = 0.25) +
+    coord_polar(theta = "y") +
+    xlim(0.7, 2.6) +
+    scale_fill_manual(values = func_colors, drop = FALSE) +
+    theme_void() +
+    labs(title = title_text, fill = "Function") +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 10),
+      legend.position = if (show_legend) "right" else "none",
+      legend.title = element_text(size = 9),
+      legend.text = element_text(size = 8)
+    ) +
+    annotate(
+      "text",
+      x = 0,
+      y = 0,
+      label = paste0("n=", format(sum(df_one$n), big.mark = ",")),
+      size = 3.1
+    )
+}
+
+# -----------------------------
+# 11. Build all donut plots
+# -----------------------------
+groups <- levels(sum_func_df$group)
+
+plots <- lapply(seq_along(groups), function(i) {
+  g <- groups[i]
+  make_donut(
+    sum_func_df %>% filter(group == g),
+    title_text = g,
+    show_legend = (i == 1)
+  )
+})
+
+p_all <- wrap_plots(plots, ncol = 3)
+
+# -----------------------------
+# 12. Print plots
+# -----------------------------
+p_upset
+p_bar
+p_all
+
+
+```
+
+# Fig. 4
+
+## Fig. 4b
+```{r cars}
+
+# =========================================================
+# Sankey diagram of host taxonomy and viral family links
+# =========================================================
+
+library(dplyr)
+library(forcats)
+library(tibble)
+library(stringr)
+library(networkD3)
+library(htmlwidgets)
+library(webshot2)
+library(openxlsx)
+library(writexl)
+library(cols4all)
+
+# -----------------------------
+# 1. Input data
+# -----------------------------
+df_4b <- readRDS("df_4b.rds")
+
+# -----------------------------
+# 2. Color palette
+# -----------------------------
+# Use a 20-color palette from cols4all and randomize color order
+base_colors <- c4a("classic20", 20)
+link_colors <- sample(base_colors, length(base_colors))
+
+# -----------------------------
+# 3. Standardize column names and clean taxonomic prefixes
+# -----------------------------
+df_4b <- df_4b %>%
+  dplyr::rename(
+    Host_Genus  = Genus,
+    Host_Phylum = Phyla,
+    Count       = number,
+    Host_Domain = Domain
+  ) %>%
+  mutate(
+    Host_Genus  = str_remove(Host_Genus, "^g__"),
+    Host_Phylum = str_remove(Host_Phylum, "^p__"),
+    Host_Domain = str_remove(Host_Domain, "^d__"),
+    Host_Genus  = str_trim(Host_Genus),
+    Host_Phylum = str_trim(Host_Phylum),
+    Host_Domain = str_trim(Host_Domain),
+    Count       = as.numeric(Count)
+  ) %>%
+  filter(
+    !is.na(Host_Domain),
+    !is.na(Host_Phylum),
+    !is.na(Host_Genus),
+    !is.na(Virus)
+  )
+
+# -----------------------------
+# 4. Merge duplicated paths
+# -----------------------------
+df_4b <- df_4b %>%
+  group_by(Host_Domain, Host_Phylum, Host_Genus, Virus) %>%
+  summarise(Count = sum(Count, na.rm = TRUE), .groups = "drop")
+
+# -----------------------------
+# 5. Parameters for low-abundance merging
+# -----------------------------
+TOPN_PHYLUM <- 10
+TOPN_GENUS  <- 12
+TOPN_VIRUS  <- 12
+TRUNC_WIDTH <- 26
+
+# -----------------------------
+# 6. Compute total abundance at each level
+# -----------------------------
+phylum_tot <- df_4b %>%
+  group_by(Host_Phylum) %>%
+  summarise(n = sum(Count), .groups = "drop")
+
+genus_tot <- df_4b %>%
+  group_by(Host_Genus) %>%
+  summarise(n = sum(Count), .groups = "drop")
+
+virus_tot <- df_4b %>%
+  group_by(Virus) %>%
+  summarise(n = sum(Count), .groups = "drop")
+
+top_phylum <- phylum_tot %>%
+  slice_max(n, n = TOPN_PHYLUM, with_ties = FALSE) %>%
+  pull(Host_Phylum)
+
+top_genus <- genus_tot %>%
+  slice_max(n, n = TOPN_GENUS, with_ties = FALSE) %>%
+  pull(Host_Genus)
+
+top_virus <- virus_tot %>%
+  slice_max(n, n = TOPN_VIRUS, with_ties = FALSE) %>%
+  pull(Virus)
+
+# -----------------------------
+# 7. Collapse low-abundance groups into "Other"
+# -----------------------------
+df_4b <- df_4b %>%
+  mutate(
+    Host_Phylum = ifelse(Host_Phylum %in% top_phylum, Host_Phylum, "Other phyla"),
+    Host_Genus  = ifelse(Host_Genus  %in% top_genus,  Host_Genus,  "Other genera"),
+    Virus       = ifelse(Virus       %in% top_virus,  Virus,       "Other families")
+  ) %>%
+  group_by(Host_Domain, Host_Phylum, Host_Genus, Virus) %>%
+  summarise(Count = sum(Count), .groups = "drop") %>%
+  mutate(
+    Host_Phylum = str_trunc(Host_Phylum, TRUNC_WIDTH),
+    Host_Genus  = str_trunc(Host_Genus, TRUNC_WIDTH),
+    Virus       = str_trunc(Virus, TRUNC_WIDTH)
+  )
+
+# -----------------------------
+# 8. Set factor order
+# -----------------------------
+df_4b <- df_4b %>%
+  mutate(
+    Host_Domain = factor(Host_Domain, levels = c("Bacteria", "Archaea")),
+    Host_Phylum = fct_infreq(Host_Phylum),
+    Host_Genus  = fct_infreq(Host_Genus),
+    Virus       = fct_infreq(Virus)
+  )
+
+# -----------------------------
+# 9. Build node table
+# -----------------------------
+nodes <- bind_rows(
+  tibble(name = levels(df_4b$Host_Domain), axis = "Host Domain"),
+  tibble(name = levels(df_4b$Host_Phylum), axis = "Host Phylum"),
+  tibble(name = levels(df_4b$Host_Genus),  axis = "Host Genus"),
+  tibble(name = levels(df_4b$Virus),       axis = "Virus Family")
+) %>%
+  mutate(id = row_number() - 1)
+
+# -----------------------------
+# 10. Build link table
+#     Domain -> Phylum -> Genus -> Virus
+#     Links are colored by phylum
+# -----------------------------
+links1 <- df_4b %>%
+  group_by(Host_Domain, Host_Phylum) %>%
+  summarise(value = sum(Count), .groups = "drop") %>%
+  left_join(
+    nodes %>% filter(axis == "Host Domain") %>% select(name, source = id),
+    by = c("Host_Domain" = "name")
+  ) %>%
+  left_join(
+    nodes %>% filter(axis == "Host Phylum") %>% select(name, target = id),
+    by = c("Host_Phylum" = "name")
+  ) %>%
+  mutate(group = as.character(Host_Phylum)) %>%
+  select(source, target, value, group)
+
+links2 <- df_4b %>%
+  group_by(Host_Phylum, Host_Genus) %>%
+  summarise(value = sum(Count), .groups = "drop") %>%
+  left_join(
+    nodes %>% filter(axis == "Host Phylum") %>% select(name, source = id),
+    by = c("Host_Phylum" = "name")
+  ) %>%
+  left_join(
+    nodes %>% filter(axis == "Host Genus") %>% select(name, target = id),
+    by = c("Host_Genus" = "name")
+  ) %>%
+  mutate(group = as.character(Host_Phylum)) %>%
+  select(source, target, value, group)
+
+links3 <- df_4b %>%
+  group_by(Host_Phylum, Host_Genus, Virus) %>%
+  summarise(value = sum(Count), .groups = "drop") %>%
+  left_join(
+    nodes %>% filter(axis == "Host Genus") %>% select(name, source = id),
+    by = c("Host_Genus" = "name")
+  ) %>%
+  left_join(
+    nodes %>% filter(axis == "Virus Family") %>% select(name, target = id),
+    by = c("Virus" = "name")
+  ) %>%
+  mutate(group = as.character(Host_Phylum)) %>%
+  select(source, target, value, group)
+
+links <- bind_rows(links1, links2, links3)
+
+# -----------------------------
+# 11. Convert to data frames for networkD3
+# -----------------------------
+nodes_df <- as.data.frame(nodes)
+links_df <- as.data.frame(links)
+
+# D3 color scale
+colourScale <- sprintf(
+  'd3.scaleOrdinal().range(["%s"])',
+  paste(link_colors, collapse = '","')
+)
+
+# -----------------------------
+# 12. Base Sankey plot
+# -----------------------------
+sankey_base <- sankeyNetwork(
+  Links = links_df,
+  Nodes = nodes_df,
+  Source = "source",
+  Target = "target",
+  Value = "value",
+  NodeID = "name",
+  units = "T",
+  fontSize = 15,
+  fontFamily = "Arial",
+  nodeWidth = 25,
+  height = 600,
+  width = 800,
+  iterations = 64,
+  nodePadding = 15,
+  colourScale = colourScale
+)
+
+sankey_base
+
+# -----------------------------
+# 13. Add gradient links and styling
+# -----------------------------
+p_4b <- htmlwidgets::onRender(
+  sankey_base,
+  '
+  function(el, x) {
+    var svg = d3.select(el).select("svg");
+
+    function createValidID(name) {
+      if (!name) return "unknown";
+      return name.replace(/[^a-zA-Z0-9-]/g, "_");
+    }
+
+    var nodesToRemove = [];
+    svg.selectAll(".node").each(function(d) {
+      if (!d.name || d.name === "NA") nodesToRemove.push(d.name);
+    });
+
+    nodesToRemove.forEach(function(nodeName) {
+      svg.selectAll(".link").filter(function(link) {
+        return link.target.name === nodeName;
+      }).remove();
+
+      svg.selectAll(".node").filter(function(node) {
+        return node.name === nodeName;
+      }).remove();
+    });
+
+    svg.selectAll(".link").each(function(d) {
+      var gradientID = "gradient-" + createValidID(d.source.name) + "-" + createValidID(d.target.name);
+
+      var gradient = svg.append("defs")
+        .append("linearGradient")
+        .attr("id", gradientID)
+        .attr("gradientUnits", "userSpaceOnUse")
+        .attr("x1", d.source.x + d.source.dx / 2)
+        .attr("y1", d.source.y + d.source.dy / 2)
+        .attr("x2", d.target.x + d.target.dx / 2)
+        .attr("y2", d.target.y + d.target.dy / 2);
+
+      var sourceColor = d3.select(el)
+        .selectAll(".node")
+        .filter(function(node) { return node.name === d.source.name; })
+        .select("rect")
+        .style("fill");
+
+      var targetColor = d3.select(el)
+        .selectAll(".node")
+        .filter(function(node) { return node.name === d.target.name; })
+        .select("rect")
+        .style("fill");
+
+      gradient.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", sourceColor);
+
+      gradient.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", targetColor);
+
+      d3.select(this).style("stroke", "url(#" + gradientID + ")");
+    });
+
+    // Make nodes semi-transparent
+    svg.selectAll(".node rect")
+      .style("fill-opacity", 0.5);
+
+    // Make links more transparent
+    svg.selectAll(".link")
+      .style("stroke-opacity", 0.20);
+
+    // Add black borders to nodes
+    svg.selectAll(".node rect")
+      .style("stroke", "black")
+      .style("stroke-width", "1.5px");
+  }
+  '
+)
+
+p_4b
+
+# -----------------------------
+# 14. Export outputs
+# -----------------------------
+saveWidget(p_4b, file = "sankey_diagram3.html", selfcontained = TRUE)
+webshot("sankey_diagram3.html", "sankey3.pdf")
+
+```
+
+## Fig. 4c
+```{r cars}
+# =========================================================
+# Relative abundance area plots for host phyla and linked-vOTU phyla
+# =========================================================
+
+# -----------------------------
+# 1. Load packages
+# -----------------------------
+library(tidyverse)   # ggplot2, dplyr, tidyr, etc.
+library(readr)       # fast input/output if needed
+
+# -----------------------------
+# 2. Load input data
+# -----------------------------
+host_data <- readRDS("df_4c.rds")
+
+df_host <- host_data$df_host
+df_linked_vOTU <- host_data$df_linked_vOTU
+
+# -----------------------------
+# 3. Define sample order
+# -----------------------------
+# The first column is assumed to be "Phylum";
+# all remaining columns are sample names
+sample_order <- colnames(df_host)[-1]
+
+# -----------------------------
+# 4. Define phylum colors
+# -----------------------------
+phylum_colors <- c(
+  "Others"              = "#CCCCCC",
+  "Nanoarchaeota"       = "#D1BEDC",
+  "Desulfobacterota_D"  = "#652F8D",
+  "Gemmatimonadota"     = "#F0CFE3",
+  "Nitrospinota"        = "#D090BD",
+  "Desulfobacterota_B"  = "#E64392",
+  "Chloroflexota"       = "#F6D467",
+  "KSB1"                = "#F6FF55",
+  "Bacteroidota"        = "#BA8D17",
+  "Nitrospirota"        = "#C2DBB1",
+  "JADFOP01"            = "#6EAA45",
+  "Acidobacteriota"     = "#547F35",
+  "Planctomycetota"     = "#DAE3F2",
+  "Methylomirabilota"   = "#B3C4E5",
+  "Pseudomonadota"      = "#8EA7D2",
+  "Thermoproteota"      = "#2C5292"
+)
+
+# -----------------------------
+# 5. Helper function:
+#    convert wide abundance table to long format
+#    and calculate relative abundance within each sample
+# -----------------------------
+prepare_relative_abundance <- function(df, sample_levels, color_levels) {
+  df_long <- df %>%
+    pivot_longer(
+      -Phylum,
+      names_to = "Sample",
+      values_to = "Abundance"
+    ) %>%
+    mutate(
+      Sample = factor(Sample, levels = sample_levels)
+    ) %>%
+    group_by(Sample) %>%
+    mutate(
+      Relative = Abundance / sum(Abundance, na.rm = TRUE)
+    ) %>%
+    ungroup()
+
+  df_long$Phylum <- factor(df_long$Phylum, levels = color_levels)
+
+  df_long
+}
+
+# -----------------------------
+# 6. Prepare long-format data
+# -----------------------------
+df_long_host <- prepare_relative_abundance(
+  df = df_host,
+  sample_levels = sample_order,
+  color_levels = names(phylum_colors)
+)
+
+df_long_linked_vOTU <- prepare_relative_abundance(
+  df = df_linked_vOTU,
+  sample_levels = sample_order,
+  color_levels = names(phylum_colors)
+)
+
+# -----------------------------
+# 7. Plot: host composition
+# -----------------------------
+p_4c_host <- ggplot(
+  df_long_host,
+  aes(x = Sample, y = Relative, fill = Phylum, group = Phylum)
+) +
+  geom_area(position = "stack") +
+  scale_fill_manual(
+    values = phylum_colors,
+    drop = FALSE,
+    breaks = names(phylum_colors)
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = NULL, y = "Host proportion (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+p_4c_host
+
+# -----------------------------
+# 8. Plot: linked-vOTU composition
+# -----------------------------
+p_4c_virus <- ggplot(
+  df_long_linked_vOTU,
+  aes(x = Sample, y = Relative, fill = Phylum, group = Phylum)
+) +
+  geom_area(position = "stack") +
+  scale_fill_manual(
+    values = phylum_colors,
+    drop = FALSE,
+    breaks = names(phylum_colors)
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = NULL, y = "Viral proportion (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+p_4c_virus
+
+
+```
+
+
+## Fig. 5
+
+## Fig. 5a
+```{r cars}
+# =========================================================
+# Heatmap of AMG-associated vOTU profiles
+# - Input matrix and annotation tables are loaded from an RDS file
+# - Row and column clustering are disabled to preserve the input order
+# =========================================================
+
+# -----------------------------
+# 1. Load packages
+# -----------------------------
+library(pheatmap)
+library(RColorBrewer)
+
+# -----------------------------
+# 2. Load input data
+# -----------------------------
+amg_heatmap_data <- readRDS("df_5a.rds")
+
+heatmap_matrix <- amg_heatmap_data$df_5a
+col_annotation <- amg_heatmap_data$datacol
+row_annotation <- amg_heatmap_data$datarow
+
+# -----------------------------
+# 3. Define color palette
+# -----------------------------
+blues9 <- brewer.pal(9, "Blues")
+
+# -----------------------------
+# 4. Draw heatmap
+#    Clustering is disabled so that the plot follows
+#    the order already defined in the matrix and annotation tables
+# -----------------------------
+p_5a <- pheatmap(
+  heatmap_matrix,
+  annotation_col = col_annotation,
+  annotation_row = row_annotation,
+  clustering_distance_rows = "euclidean",
+  color = blues9,
+  cluster_cols = FALSE,
+  cluster_rows = FALSE,
+  show_rownames = TRUE,
+  show_colnames = TRUE
+)
+
+
+```
+
+
+## Fig. 6
+
+## Fig. 6a
+```{r cars}
+# =========================================================
+# Gene map of viral genomes carrying HO-related regions
+# =========================================================
+
+# -----------------------------
+# 1. Load packages
+# -----------------------------
+library(gggenes)
+library(ggplot2)
+library(dplyr)
+
+# -----------------------------
+# 2. Load input data
+# -----------------------------
+# Required columns in df_6a:
+# - start: gene start position
+# - end: gene end position
+# - viruses: viral genome / contig identifier
+# - gene: gene category used for fill colors
+# - strand: gene direction ("forward" or other)
+gene_map_df <- readRDS("df_6a.rds")
+
+# -----------------------------
+# 3. Define color palette
+# -----------------------------
+gene_colors <- c(
+  "AMG"        = "#e35025",
+  "Viral-like" = "#edd365",
+  "Others"     = "#bebdbd",
+  "Hallmark"   = "#add8e5"
+)
+
+# -----------------------------
+# 4. Plot gene map
+# -----------------------------
+p_6a <- gene_map_df %>%
+  ggplot(
+    aes(
+      xmin = start,
+      xmax = end,
+      y = viruses,
+      fill = gene,
+      forward = strand == "forward"
+    )
+  ) +
+  geom_gene_arrow(
+    arrowhead_height = unit(6, "mm"),
+    arrowhead_width = unit(1.5, "mm"),
+    arrow_body_height = unit(4, "mm"),
+    colour = NA,
+    size = 0
+  ) +
+  facet_wrap(~ viruses, scales = "free", ncol = 1) +
+  scale_fill_manual(values = gene_colors) +
+  theme_genes() +
+  theme(
+    legend.position = "bottom"
+  )
+
+p_6a
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
