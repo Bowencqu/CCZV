@@ -1,0 +1,1 @@
+All input data are stored as .rds files, each containing the processed data required to reproduce a specific figure panel. File names follow the figure labels. For example, df_2a.rds corresponds to Fig. 2a.
